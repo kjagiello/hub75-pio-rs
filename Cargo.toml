@@ -1,0 +1,13 @@
+[package]
+name = "hub75-pio"
+version = "0.1.0"
+edition = "2021"
+description = "A HUB75 driver for RP2040. Utilizes PIO and DMA to achieve zero CPU overhead."
+license = "MIT"
+
+[dependencies]
+pio-proc = "0.2.1"
+pio = "0.2.0"
+
+rp2040-hal = "0.6.0"
+embedded-graphics = "0.7.1"
