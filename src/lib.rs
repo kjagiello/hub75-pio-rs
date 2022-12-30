@@ -38,8 +38,9 @@ use rp2040_hal::pio::{
 
 pub mod dma;
 
-/// Clock divider for the PIO SM. Set to 1.0 as we want to go full speed.
-const PIO_CLK_DIV: f32 = 1.0;
+/// Clock divider for the PIO SM
+const PIO_CLK_DIV_INT: u16 = 1;
+const PIO_CLK_DIV_FRAQ: u8 = 255;
 
 /// Framebuffer size in bytes
 #[doc(hidden)]
@@ -272,7 +273,7 @@ where
                 .out_pins(pins.r1.id().num, 6)
                 .side_set_pin_base(pins.clk.id().num)
                 .out_sticky(false)
-                .clock_divisor(PIO_CLK_DIV)
+                .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
                 .out_shift_direction(ShiftDirection::Right)
                 .in_shift_direction(ShiftDirection::Right)
                 .autopull(true)
@@ -318,7 +319,7 @@ where
             let (mut sm, _, mut tx) = PIOBuilder::from_program(installed)
                 .out_pins(pins.addra.id().num, 4)
                 .side_set_pin_base(pins.lat.id().num)
-                .clock_divisor(PIO_CLK_DIV)
+                .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
                 .out_sticky(true)
                 .build(row_sm);
             sm.set_pindirs([
@@ -352,7 +353,7 @@ where
             let installed = pio_block.install(&program_data.program).unwrap();
             let (mut sm, _, tx) = PIOBuilder::from_program(installed)
                 .set_pins(pins.oe.id().num, 1)
-                .clock_divisor(PIO_CLK_DIV)
+                .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
                 .autopull(true)
                 .out_sticky(true)
                 .build(oe_sm);
