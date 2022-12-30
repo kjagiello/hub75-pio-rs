@@ -263,7 +263,7 @@ where
                 "wait 1 irq 5   side 0b0",
                 "mov x isr      side 0b0",
                 "pixel:",
-                "out pins, 8    side 0b0 [2]",
+                "out pins, 8    side 0b0",
                 "jmp x-- pixel  side 0b1 [1]", // clock out the pixel
                 "irq 4          side 0b0",     // tell the row program to set the next row
                 ".wrap",
@@ -307,9 +307,7 @@ where
                 "row:",
                 "irq 5          side 0b0", // Signal to the data SM that row is set
                 "wait 1 irq 4   side 0b0", // Wait until the data SM asks for next row
-                "nop            side 0b1", // Latch the data
-                "nop            side 0b1", // Latch the data (one more pulse required at high speed)
-                "irq 6          side 0b0", // Run a step in the delay program
+                "irq 6          side 0b1", // Latch the data and run a step in the delay program
                 "wait 1 irq 7   side 0b0", // Wait for the OE delay to complete
                 "jmp y-- row    side 0b0",
                 "jmp x-- addr   side 0b0",
@@ -320,7 +318,6 @@ where
                 .out_pins(pins.addra.id().num, 4)
                 .side_set_pin_base(pins.lat.id().num)
                 .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
-                .out_sticky(true)
                 .build(row_sm);
             sm.set_pindirs([
                 (pins.addra.id().num, PinDir::Output),
@@ -344,10 +341,10 @@ where
                 "out x, 32",
                 "wait 1 irq 6",
                 "delay:",
-                "set pins, 0b0 [1]",
+                "set pins, 0b0",
                 "jmp x-- delay",
                 "set pins, 0b1",
-                "irq 7       ",
+                "irq 7",
                 ".wrap",
             );
             let installed = pio_block.install(&program_data.program).unwrap();
