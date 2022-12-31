@@ -160,16 +160,19 @@ pub struct DisplayPins {
 }
 
 /// The HUB75 display driver
-pub struct Display<const W: usize, const H: usize, const B: usize>
+pub struct Display<CH1, const W: usize, const H: usize, const B: usize>
 where
     [(); fb_bytes(W, H, B)]: Sized,
+    CH1: ChannelIndex,
 {
     mem: &'static mut DisplayMemory<W, H, B>,
+    fb_loop_ch: Channel<CH1>,
 }
 
-impl<const W: usize, const H: usize, const B: usize> Display<W, H, B>
+impl<CH1, const W: usize, const H: usize, const B: usize> Display<CH1, W, H, B>
 where
     [(); fb_bytes(W, H, B)]: Sized,
+    CH1: ChannelIndex,
 {
     /// Creates a new display
     ///
@@ -188,7 +191,7 @@ where
     /// * `pins`: Pins to use for the communication with the display
     /// * `pio_sms`: PIO state machines to be used to drive the display
     /// * `dma_chs`: DMA channels to be used to drive the PIO state machines
-    pub fn new<PE, SM0, SM1, SM2, CH0, CH1, CH2, CH3>(
+    pub fn new<PE, SM0, SM1, SM2, CH0, CH2, CH3>(
         buffer: &'static mut DisplayMemory<W, H, B>,
         mut pins: DisplayPins,
         pio_block: &mut PIO<PE>,
@@ -205,7 +208,6 @@ where
         SM1: StateMachineIndex,
         SM2: StateMachineIndex,
         CH0: ChannelIndex,
-        CH1: ChannelIndex,
         CH2: ChannelIndex,
         CH3: ChannelIndex,
     {
@@ -521,7 +523,19 @@ where
         row_sm.start();
         oe_sm.start();
 
-        Display { mem: buffer }
+        Display {
+            mem: buffer,
+            fb_loop_ch,
+        }
+    }
+
+    fn fb_loop_busy(&self) -> bool {
+        self.fb_loop_ch
+            .regs()
+            .ch_ctrl_trig
+            .read()
+            .busy()
+            .bit_is_set()
     }
 
     /// Flips the display buffers
@@ -530,9 +544,11 @@ where
     pub fn commit(&mut self) {
         if self.mem.fbptr[0] == (self.mem.fb0.as_ptr() as u32) {
             self.mem.fbptr[0] = self.mem.fb1.as_ptr() as u32;
+            while !self.fb_loop_busy() {}
             self.mem.fb0[0..].fill(0);
         } else {
             self.mem.fbptr[0] = self.mem.fb0.as_ptr() as u32;
+            while !self.fb_loop_busy() {}
             self.mem.fb1[0..].fill(0);
         }
     }
@@ -565,18 +581,20 @@ where
     }
 }
 
-impl<const W: usize, const H: usize, const B: usize> OriginDimensions for Display<W, H, B>
+impl<CH1, const W: usize, const H: usize, const B: usize> OriginDimensions for Display<CH1, W, H, B>
 where
     [(); fb_bytes(W, H, B)]: Sized,
+    CH1: ChannelIndex,
 {
     fn size(&self) -> Size {
         Size::new(W.try_into().unwrap(), H.try_into().unwrap())
     }
 }
 
-impl<const W: usize, const H: usize, const B: usize> DrawTarget for Display<W, H, B>
+impl<CH1, const W: usize, const H: usize, const B: usize> DrawTarget for Display<CH1, W, H, B>
 where
     [(); fb_bytes(W, H, B)]: Sized,
+    CH1: ChannelIndex,
 {
     type Color = Rgb888;
     type Error = core::convert::Infallible;
