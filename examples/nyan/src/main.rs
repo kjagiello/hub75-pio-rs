@@ -106,10 +106,12 @@ fn main() -> ! {
             &mut pio,
             (sm0, sm1, sm2),
             (dma.ch0, dma.ch1, dma.ch2, dma.ch3),
+            false,
         )
     };
 
     // Display Nyancat
+    display.set_brightness(255);
     loop {
         for raw_frame in FRAMES {
             let frame = Qoi::new(raw_frame).unwrap();
