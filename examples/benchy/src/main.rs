@@ -6,6 +6,7 @@
 #![feature(generic_const_exprs)]
 
 use bsp::entry;
+use core::ptr;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::*};
@@ -15,22 +16,45 @@ use bsp::hal::pio::PIOExt;
 use bsp::hal::{
     clocks::{init_clocks_and_plls, Clock},
     pac,
+    pac::interrupt,
     sio::Sio,
     watchdog::Watchdog,
 };
 use hub75_pio;
 use hub75_pio::dma::DMAExt;
 
+use core::cell::RefCell;
+use core::str;
+use critical_section::Mutex;
+use embedded_graphics::{
+    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    text::Text,
+};
 use rp_pico as bsp;
 
-mod flame;
-
 static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 8> = hub75_pio::DisplayMemory::new();
+static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0u32));
+
+fn hz_to_str(mut n: u32, buf: &mut [u8]) -> &[u8] {
+    if n == 0 {
+        return b"0";
+    }
+    let mut i = 3;
+    while n > 0 {
+        buf[i] = (n % 10) as u8 + b'0';
+        n /= 10;
+        i += 1;
+    }
+    buf[0] = 'z' as u8;
+    buf[1] = 'H' as u8;
+    buf[2] = ' ' as u8;
+    let slice = &mut buf[..i];
+    slice.reverse();
+    &*slice
+}
 
 #[entry]
 fn main() -> ! {
-    info!("Program start");
-
     let mut pac = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(pac.WATCHDOG);
@@ -69,7 +93,18 @@ fn main() -> ! {
     while resets.reset_done.read().dma().bit_is_clear() {}
 
     // Split DMA
+    let dma = &pac.DMA;
+    dma.inte0.write(|w| unsafe { w.bits(1 << 0) });
+
     let dma = pac.DMA.split();
+
+    // Unmask the IO_BANK0 IRQ so that the NVIC interrupt controller
+    // will jump to the interrupt function when the interrupt occurs.
+    // We do this last so that the interrupt can't go off while
+    // it is in the middle of being configured
+    unsafe {
+        pac::NVIC::unmask(pac::Interrupt::DMA_IRQ_0);
+    }
 
     let mut display = unsafe {
         hub75_pio::Display::new(
@@ -92,25 +127,38 @@ fn main() -> ! {
             &mut pio,
             (sm0, sm1, sm2),
             (dma.ch0, dma.ch1, dma.ch2, dma.ch3),
-            false,
+            true,
         )
     };
 
-    let mut t = 0;
-    loop {
-        let canvas = flame::tick(t);
-        for (y, row) in canvas.row_iter().enumerate() {
-            for (x, col) in row.column_iter().enumerate() {
-                let a = canvas[(x, y)];
-                let r: u8 = *a.get(0).unwrap();
-                let g: u8 = *a.get(1).unwrap();
-                let b: u8 = *a.get(2).unwrap();
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb888::WHITE);
+    let mut last_value = 0;
+    let mut hz = 0;
 
-                display.set_pixel(x + 14, y, Rgb888::new(r, g, b));
-            }
-        }
+    loop {
+        let mut buf = [0u8; 20];
+        let buf = hz_to_str(hz, &mut buf);
+        let buf = str::from_utf8(&buf).unwrap();
+        Text::new(buf, Point::new(12, 19), style)
+            .draw(&mut display)
+            .unwrap();
         display.commit();
-        delay.delay_ms(10);
-        t = (t + 1) % 2000;
+        delay.delay_ms(1000);
+
+        let counter = critical_section::with(|cs| *COUNTER.borrow_ref_mut(cs));
+        if counter > last_value {
+            hz = counter - last_value;
+        }
+        last_value = counter;
     }
+}
+
+#[interrupt]
+fn DMA_IRQ_0() {
+    critical_section::with(|cs| {
+        COUNTER.replace_with(cs, |counter| (*counter + 1) % 100000000);
+    });
+    // Clear the DMA interrupt flag
+    const INTS: *mut u32 = (0x50000000 + 0x40c) as *mut u32;
+    unsafe { ptr::write_volatile(INTS, 0b1) };
 }

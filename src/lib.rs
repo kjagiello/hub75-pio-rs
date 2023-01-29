@@ -27,20 +27,18 @@
 #![feature(generic_const_exprs)]
 #![feature(const_for)]
 
+// TODO: Implement the drop trait to release DMA & PIO?
+// TODO: organize these
 use crate::dma::{Channel, ChannelIndex, ChannelRegs};
 use core::convert::TryInto;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::*};
 use rp2040_hal::gpio::dynpin::{DynPin, DynPinMode};
 use rp2040_hal::gpio::FunctionConfig;
 use rp2040_hal::pio::{
-    PIOBuilder, PIOExt, PinDir, ShiftDirection, StateMachineIndex, UninitStateMachine, PIO,
+    Buffers, PIOBuilder, PIOExt, PinDir, ShiftDirection, StateMachineIndex, UninitStateMachine, PIO,
 };
 
 pub mod dma;
-
-/// Clock divider for the PIO SM
-const PIO_CLK_DIV_INT: u16 = 1;
-const PIO_CLK_DIV_FRAQ: u8 = 255;
 
 /// Framebuffer size in bytes
 #[doc(hidden)]
@@ -167,6 +165,8 @@ where
 {
     mem: &'static mut DisplayMemory<W, H, B>,
     fb_loop_ch: Channel<CH1>,
+    benchmark: bool,
+    brightness: u8,
 }
 
 impl<CH1, const W: usize, const H: usize, const B: usize> Display<CH1, W, H, B>
@@ -201,6 +201,7 @@ where
             UninitStateMachine<(PE, SM2)>,
         ),
         dma_chs: (Channel<CH0>, Channel<CH1>, Channel<CH2>, Channel<CH3>),
+        benchmark: bool,
     ) -> Self
     where
         PE: PIOExt + FunctionConfig,
@@ -211,46 +212,22 @@ where
         CH2: ChannelIndex,
         CH3: ChannelIndex,
     {
-        // Use correct PIO here
-        pins.r1
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.g1
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.b1
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.r2
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.g2
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.b2
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.clk
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.addra
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.addrb
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.addrc
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.addrd
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.lat
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
-        pins.oe
-            .try_into_mode(DynPinMode::Function(PE::DYN))
-            .unwrap();
+        let fpins = [
+            &mut pins.r1,
+            &mut pins.g1,
+            &mut pins.b1,
+            &mut pins.r2,
+            &mut pins.g2,
+            &mut pins.b2,
+            &mut pins.clk,
+            &mut pins.addra,
+            &mut pins.addrb,
+            &mut pins.addrc,
+            &mut pins.addrd,
+            &mut pins.lat,
+            &mut pins.oe,
+        ];
+        fpins.map(|pin| pin.try_into_mode(DynPinMode::Function(PE::DYN)).unwrap());
 
         // Setup PIO SMs
         let (data_sm, row_sm, oe_sm) = pio_sms;
@@ -261,24 +238,23 @@ where
                 ".side_set 1",
                 "out isr, 32    side 0b0",
                 ".wrap_target",
-                // Wait for the row program to set the ADDR pins
-                "wait 1 irq 5   side 0b0",
                 "mov x isr      side 0b0",
+                // Wait for the row program to set the ADDR pins
                 "pixel:",
                 "out pins, 8    side 0b0",
-                "jmp x-- pixel  side 0b1 [1]", // clock out the pixel
-                "irq 4          side 0b0",     // tell the row program to set the next row
+                "jmp x-- pixel  side 0b1", // clock out the pixel
+                "irq 4          side 0b0", // tell the row program to set the next row
+                "wait 1 irq 5   side 0b0",
                 ".wrap",
             );
             let installed = pio_block.install(&program_data.program).unwrap();
             let (mut sm, _, mut tx) = PIOBuilder::from_program(installed)
                 .out_pins(pins.r1.id().num, 6)
                 .side_set_pin_base(pins.clk.id().num)
-                .out_sticky(false)
-                .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
+                .clock_divisor_fixed_point(2, 0)
                 .out_shift_direction(ShiftDirection::Right)
-                .in_shift_direction(ShiftDirection::Right)
                 .autopull(true)
+                .buffers(Buffers::OnlyTx)
                 .build(data_sm);
             sm.set_pindirs([
                 (pins.r1.id().num, PinDir::Output),
@@ -299,7 +275,7 @@ where
             let program_data = pio_proc::pio_asm!(
                 ".side_set 1",
                 "pull           side 0b0", // Pull the height / 2 into OSR
-                "out isr, 32    side 0b0", // Store height / 2 in ISR
+                "out isr, 32    side 0b0", // and move it to OSR
                 "pull           side 0b0", // Pull the color depth - 1 into OSR
                 ".wrap_target",
                 "mov x, isr     side 0b0",
@@ -307,10 +283,11 @@ where
                 "mov pins, ~x   side 0b0", // Set the row address
                 "mov y, osr     side 0b0",
                 "row:",
-                "irq 5          side 0b0", // Signal to the data SM that row is set
-                "wait 1 irq 4   side 0b0", // Wait until the data SM asks for next row
-                "irq 6          side 0b1", // Latch the data and run a step in the delay program
-                "wait 1 irq 7   side 0b0", // Wait for the OE delay to complete
+                "wait 1 irq 4   side 0b0", // Wait until the data is clocked in
+                "nop            side 0b1",
+                "irq 6          side 0b1", // Display the latched data
+                "irq 5          side 0b0", // Clock in next row
+                "wait 1 irq 7   side 0b0", // Wait for the OE cycle to complete
                 "jmp y-- row    side 0b0",
                 "jmp x-- addr   side 0b0",
                 ".wrap",
@@ -319,7 +296,7 @@ where
             let (mut sm, _, mut tx) = PIOBuilder::from_program(installed)
                 .out_pins(pins.addra.id().num, 4)
                 .side_set_pin_base(pins.lat.id().num)
-                .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
+                .clock_divisor_fixed_point(1, 1)
                 .build(row_sm);
             sm.set_pindirs([
                 (pins.addra.id().num, PinDir::Output),
@@ -339,22 +316,21 @@ where
             // Control the delay using DMA - buffer with 8 bytes specifying the length of the delays
             // Delay program (controls OE)
             let program_data = pio_proc::pio_asm!(
+                ".side_set 1"
                 ".wrap_target",
-                "out x, 32",
-                "wait 1 irq 6",
+                "out x, 32      side 0b1",
+                "wait 1 irq 6   side 0b1",
                 "delay:",
-                "set pins, 0b0",
-                "jmp x-- delay",
-                "set pins, 0b1",
-                "irq 7",
+                "jmp x-- delay  side 0b0",
+                "irq 7          side 0b1",
                 ".wrap",
             );
             let installed = pio_block.install(&program_data.program).unwrap();
             let (mut sm, _, tx) = PIOBuilder::from_program(installed)
-                .set_pins(pins.oe.id().num, 1)
-                .clock_divisor_fixed_point(PIO_CLK_DIV_INT, PIO_CLK_DIV_FRAQ)
+                .side_set_pin_base(pins.oe.id().num)
+                .clock_divisor_fixed_point(1, 1)
                 .autopull(true)
-                .out_sticky(true)
+                .buffers(Buffers::OnlyTx)
                 .build(oe_sm);
             sm.set_pindirs([(pins.oe.id().num, PinDir::Output)]);
             (sm, tx)
@@ -384,7 +360,7 @@ where
                 .bits(data_sm_tx.dreq_value())
                 // Turn off interrupts
                 .irq_quiet()
-                .bit(true)
+                .bit(!benchmark)
                 // Chain to the channel selecting the framebuffers
                 .chain_to()
                 .bits(CH1::id())
@@ -526,6 +502,8 @@ where
         Display {
             mem: buffer,
             fb_loop_ch,
+            benchmark,
+            brightness: 255,
         }
     }
 
@@ -544,11 +522,11 @@ where
     pub fn commit(&mut self) {
         if self.mem.fbptr[0] == (self.mem.fb0.as_ptr() as u32) {
             self.mem.fbptr[0] = self.mem.fb1.as_ptr() as u32;
-            while !self.fb_loop_busy() {}
+            while !self.benchmark && !self.fb_loop_busy() {}
             self.mem.fb0[0..].fill(0);
         } else {
             self.mem.fbptr[0] = self.mem.fb0.as_ptr() as u32;
-            while !self.fb_loop_busy() {}
+            while !self.benchmark && !self.fb_loop_busy() {}
             self.mem.fb1[0..].fill(0);
         }
     }
@@ -563,13 +541,16 @@ where
         // Half of the screen
         let h = y > (H / 2) - 1;
         let shift = if h { 3 } else { 0 };
+        let c_r: u16 = ((color.r() as f32) * (self.brightness as f32 / 255f32)) as u16;
+        let c_g: u16 = ((color.g() as f32) * (self.brightness as f32 / 255f32)) as u16;
+        let c_b: u16 = ((color.b() as f32) * (self.brightness as f32 / 255f32)) as u16;
         for b in 0..B {
             // Extract the n-th bit of each component of the color and pack it together
-            let cr = color.r() >> b & 0b1;
-            let cg = color.g() >> b & 0b1;
-            let cb = color.b() >> b & 0b1;
+            let cr = c_r >> b & 0b1;
+            let cg = c_g >> b & 0b1;
+            let cb = c_b >> b & 0b1;
             let c = cb << 2 | cg << 1 | cr;
-            let idx = (b) * W + x + ((y % (H / 2)) * W * B);
+            let idx = b * W + x + ((y % (H / 2)) * W * B);
             if self.mem.fbptr[0] == (self.mem.fb0.as_ptr() as u32) {
                 self.mem.fb1[idx] &= !(0b111 << shift);
                 self.mem.fb1[idx] |= (c << shift) as u8;
@@ -578,6 +559,10 @@ where
                 self.mem.fb0[idx] |= (c << shift) as u8;
             }
         }
+    }
+
+    pub fn set_brightness(&mut self, brightness: u8) {
+        self.brightness = brightness
     }
 }
 
