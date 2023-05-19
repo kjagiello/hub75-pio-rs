@@ -8,7 +8,7 @@
 use bsp::entry;
 use defmt::*;
 use defmt_rtt as _;
-use embedded_graphics::{pixelcolor::Rgb888, prelude::*};
+use embedded_graphics::pixelcolor::Rgb888;
 use panic_probe as _;
 
 use bsp::hal::pio::PIOExt;
@@ -20,12 +20,13 @@ use bsp::hal::{
 };
 use hub75_pio;
 use hub75_pio::dma::DMAExt;
+use hub75_pio::lut::GammaLut;
 
 use rp_pico as bsp;
 
 mod flame;
 
-static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 8> = hub75_pio::DisplayMemory::new();
+static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 12> = hub75_pio::DisplayMemory::new();
 
 #[entry]
 fn main() -> ! {
@@ -71,6 +72,10 @@ fn main() -> ! {
     // Split DMA
     let dma = pac.DMA.split();
 
+    let lut = {
+        let lut: GammaLut<12, _, _> = GammaLut::new();
+        lut.init((1.0, 1.0, 1.0))
+    };
     let mut display = unsafe {
         hub75_pio::Display::new(
             &mut DISPLAY_BUFFER,
@@ -93,6 +98,7 @@ fn main() -> ! {
             (sm0, sm1, sm2),
             (dma.ch0, dma.ch1, dma.ch2, dma.ch3),
             false,
+            &lut,
         )
     };
 
@@ -100,7 +106,7 @@ fn main() -> ! {
     loop {
         let canvas = flame::tick(t);
         for (y, row) in canvas.row_iter().enumerate() {
-            for (x, col) in row.column_iter().enumerate() {
+            for (x, _) in row.column_iter().enumerate() {
                 let a = canvas[(x, y)];
                 let r: u8 = *a.get(0).unwrap();
                 let g: u8 = *a.get(1).unwrap();

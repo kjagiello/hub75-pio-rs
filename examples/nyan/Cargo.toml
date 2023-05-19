@@ -15,8 +15,8 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 
 rp-pico = "0.6.0"
 
-embedded-graphics = "0.7.1"
-tinyqoi = "0.1.0"
+embedded-graphics = "0.8.0"
+tinyqoi = "0.2.0"
 
 hub75-pio = { path = "../../" }
 

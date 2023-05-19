@@ -39,6 +39,7 @@ use rp2040_hal::pio::{
 };
 
 pub mod dma;
+pub mod lut;
 
 /// Framebuffer size in bytes
 #[doc(hidden)]
@@ -158,21 +159,24 @@ pub struct DisplayPins {
 }
 
 /// The HUB75 display driver
-pub struct Display<CH1, const W: usize, const H: usize, const B: usize>
+pub struct Display<'a, CH1, const W: usize, const H: usize, const B: usize, C>
 where
     [(); fb_bytes(W, H, B)]: Sized,
     CH1: ChannelIndex,
+    C: RgbColor,
 {
     mem: &'static mut DisplayMemory<W, H, B>,
     fb_loop_ch: Channel<CH1>,
     benchmark: bool,
     brightness: u8,
+    lut: &'a dyn lut::Lut<B, C>,
 }
 
-impl<CH1, const W: usize, const H: usize, const B: usize> Display<CH1, W, H, B>
+impl<'a, CH1, const W: usize, const H: usize, const B: usize, C> Display<'a, CH1, W, H, B, C>
 where
     [(); fb_bytes(W, H, B)]: Sized,
     CH1: ChannelIndex,
+    C: RgbColor,
 {
     /// Creates a new display
     ///
@@ -202,6 +206,7 @@ where
         ),
         dma_chs: (Channel<CH0>, Channel<CH1>, Channel<CH2>, Channel<CH3>),
         benchmark: bool,
+        lut: &'a impl lut::Lut<B, C>,
     ) -> Self
     where
         PE: PIOExt + FunctionConfig,
@@ -211,6 +216,7 @@ where
         CH0: ChannelIndex,
         CH2: ChannelIndex,
         CH3: ChannelIndex,
+        C: RgbColor,
     {
         let fpins = [
             &mut pins.r1,
@@ -504,6 +510,7 @@ where
             fb_loop_ch,
             benchmark,
             brightness: 255,
+            lut,
         }
     }
 
@@ -534,18 +541,19 @@ where
     /// Paints the given pixel coordinates with the given color
     ///
     /// Note that the coordinates are 0-indexed.
-    pub fn set_pixel<C: RgbColor>(&mut self, x: usize, y: usize, color: C) {
+    pub fn set_pixel(&mut self, x: usize, y: usize, color: C) {
         // invert the screen
         let x = W - 1 - x;
         let y = H - 1 - y;
         // Half of the screen
         let h = y > (H / 2) - 1;
         let shift = if h { 3 } else { 0 };
-        let c_r: u16 = ((color.r() as f32) * (self.brightness as f32 / 255f32)) as u16;
-        let c_g: u16 = ((color.g() as f32) * (self.brightness as f32 / 255f32)) as u16;
-        let c_b: u16 = ((color.b() as f32) * (self.brightness as f32 / 255f32)) as u16;
+        let (c_r, c_g, c_b) = self.lut.lookup(color);
+        let c_r: u16 = ((c_r as f32) * (self.brightness as f32 / 255f32)) as u16;
+        let c_g: u16 = ((c_g as f32) * (self.brightness as f32 / 255f32)) as u16;
+        let c_b: u16 = ((c_b as f32) * (self.brightness as f32 / 255f32)) as u16;
         for b in 0..B {
-            // Extract the n-th bit of each component of the color and pack it together
+            // Extract the n-th bit of each component of the color and pack them
             let cr = c_r >> b & 0b1;
             let cg = c_g >> b & 0b1;
             let cb = c_b >> b & 0b1;
@@ -566,22 +574,26 @@ where
     }
 }
 
-impl<CH1, const W: usize, const H: usize, const B: usize> OriginDimensions for Display<CH1, W, H, B>
+impl<'a, CH1, const W: usize, const H: usize, const B: usize, C> OriginDimensions
+    for Display<'a, CH1, W, H, B, C>
 where
     [(); fb_bytes(W, H, B)]: Sized,
     CH1: ChannelIndex,
+    C: RgbColor,
 {
     fn size(&self) -> Size {
         Size::new(W.try_into().unwrap(), H.try_into().unwrap())
     }
 }
 
-impl<CH1, const W: usize, const H: usize, const B: usize> DrawTarget for Display<CH1, W, H, B>
+impl<'a, CH1, const W: usize, const H: usize, const B: usize, C> DrawTarget
+    for Display<'a, CH1, W, H, B, C>
 where
     [(); fb_bytes(W, H, B)]: Sized,
     CH1: ChannelIndex,
+    C: RgbColor,
 {
-    type Color = Rgb888;
+    type Color = C;
     type Error = core::convert::Infallible;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>

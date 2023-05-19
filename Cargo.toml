@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 pio-proc = "0.2.1"
 pio = "0.2.0"
+libm = "0.2.6"
 
 rp2040-hal = "0.7.0"
-embedded-graphics = "0.7.1"
+embedded-graphics = "0.8.0"

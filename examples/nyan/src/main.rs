@@ -21,10 +21,11 @@ use bsp::hal::{
 };
 use hub75_pio;
 use hub75_pio::dma::DMAExt;
+use hub75_pio::lut::GammaLut;
 
 use rp_pico as bsp;
 
-static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 8> = hub75_pio::DisplayMemory::new();
+static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 12> = hub75_pio::DisplayMemory::new();
 
 const FRAMES: [&[u8]; 12] = [
     include_bytes!("../assets/01.qoi"),
@@ -85,6 +86,10 @@ fn main() -> ! {
     // Split DMA
     let dma = pac.DMA.split();
 
+    let lut = {
+        let lut: GammaLut<12, _, _> = GammaLut::new();
+        lut.init((1.0, 1.0, 1.0))
+    };
     let mut display = unsafe {
         hub75_pio::Display::new(
             &mut DISPLAY_BUFFER,
@@ -107,11 +112,11 @@ fn main() -> ! {
             (sm0, sm1, sm2),
             (dma.ch0, dma.ch1, dma.ch2, dma.ch3),
             false,
+            &lut,
         )
     };
 
     // Display Nyancat
-    display.set_brightness(255);
     loop {
         for raw_frame in FRAMES {
             let frame = Qoi::new(raw_frame).unwrap();
