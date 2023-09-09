@@ -22,6 +22,7 @@ use bsp::hal::{
 };
 use hub75_pio;
 use hub75_pio::dma::DMAExt;
+use hub75_pio::lut::GammaLut;
 
 use core::cell::RefCell;
 use core::str;
@@ -32,7 +33,7 @@ use embedded_graphics::{
 };
 use rp_pico as bsp;
 
-static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 8> = hub75_pio::DisplayMemory::new();
+static mut DISPLAY_BUFFER: hub75_pio::DisplayMemory<64, 32, 12> = hub75_pio::DisplayMemory::new();
 static COUNTER: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0u32));
 
 fn hz_to_str(mut n: u32, buf: &mut [u8]) -> &[u8] {
@@ -106,6 +107,10 @@ fn main() -> ! {
         pac::NVIC::unmask(pac::Interrupt::DMA_IRQ_0);
     }
 
+    let lut = {
+        let lut: GammaLut<12, _, _> = GammaLut::new();
+        lut.init((2.1, 2.1, 2.1))
+    };
     let mut display = unsafe {
         hub75_pio::Display::new(
             &mut DISPLAY_BUFFER,
@@ -128,6 +133,7 @@ fn main() -> ! {
             (sm0, sm1, sm2),
             (dma.ch0, dma.ch1, dma.ch2, dma.ch3),
             true,
+            &lut,
         )
     };
 
