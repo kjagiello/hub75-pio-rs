@@ -116,7 +116,7 @@ fn main() -> ! {
             }
         }
         display.commit();
-        delay.delay_ms(10);
+        delay.delay_ms(20);
         t = (t + 1) % 2000;
     }
 }

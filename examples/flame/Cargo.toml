@@ -13,13 +13,15 @@ defmt = "0.3"
 defmt-rtt = "0.3"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 
-rp-pico = "0.6.0"
+rp-pico = "0.7"
 
 embedded-graphics = "0.8.0"
 hub75-pio = { path = "../../" }
 
-nalgebra = { version = "0.31.4", default-features = false, features= ["libm"] }
-libm = "0.2.6"
+nalgebra = { version = "0.32.3", default-features = false, features= ["libm"] }
+libm = "0.2.7"
+
+num_enum = { version="0.6.0", default-features = false }
 
 # cargo build/run
 [profile.dev]
@@ -28,7 +30,7 @@ debug = 2
 debug-assertions = true
 incremental = false
 opt-level = 3
-overflow-checks = true
+overflow-checks = false
 
 # cargo build/run --release
 [profile.release]

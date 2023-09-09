@@ -31,7 +31,7 @@
 // TODO: organize these
 use crate::dma::{Channel, ChannelIndex, ChannelRegs};
 use core::convert::TryInto;
-use embedded_graphics::{pixelcolor::Rgb888, prelude::*};
+use embedded_graphics::prelude::*;
 use rp2040_hal::gpio::dynpin::{DynPin, DynPinMode};
 use rp2040_hal::gpio::FunctionConfig;
 use rp2040_hal::pio::{

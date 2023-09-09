@@ -6,9 +6,12 @@ description = "A HUB75 driver for RP2040. Utilizes PIO and DMA to achieve zero C
 license = "MIT"
 
 [dependencies]
-pio-proc = "0.2.1"
-pio = "0.2.0"
-libm = "0.2.6"
+pio-proc = "^0.2"
+pio = "^0.2"
+libm = "0.2"
 
-rp2040-hal = "0.7.0"
-embedded-graphics = "0.8.0"
+rp2040-hal = "0.8"
+embedded-graphics = "^0.8"
+
+# TODO: Remove once https://github.com/rp-rs/pio-rs/pull/47 is merged
+num_enum = { version="0.6.0", default-features = false }
