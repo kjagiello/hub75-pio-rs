@@ -2,8 +2,6 @@ use core::marker::PhantomData;
 use embedded_graphics::prelude::*;
 use libm::{powf, roundf};
 
-// Requirements:
-// 1. Convert from S-bit color to T-bit color
 pub trait Lut<const B: usize, C: RgbColor> {
     fn lookup(&self, color: C) -> (u16, u16, u16);
 }

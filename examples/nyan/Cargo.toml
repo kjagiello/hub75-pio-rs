@@ -13,7 +13,7 @@ defmt = "0.3"
 defmt-rtt = "0.3"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 
-rp-pico = "0.7.0"
+rp-pico = "0.8.0"
 
 embedded-graphics = "0.8.0"
 tinyqoi = "0.2.0"
