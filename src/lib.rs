@@ -32,8 +32,7 @@
 use crate::dma::{Channel, ChannelIndex, ChannelRegs};
 use core::convert::TryInto;
 use embedded_graphics::prelude::*;
-use rp2040_hal::gpio::dynpin::{DynPin, DynPinMode};
-use rp2040_hal::gpio::FunctionConfig;
+use rp2040_hal::gpio::{DynPinId, Function, Pin, PullNone};
 use rp2040_hal::pio::{
     Buffers, PIOBuilder, PIOExt, PinDir, ShiftDirection, StateMachineIndex, UninitStateMachine, PIO,
 };
@@ -142,20 +141,20 @@ where
 }
 
 /// Mapping between GPIO pins and HUB75 pins
-pub struct DisplayPins {
-    pub r1: DynPin,
-    pub g1: DynPin,
-    pub b1: DynPin,
-    pub r2: DynPin,
-    pub g2: DynPin,
-    pub b2: DynPin,
-    pub clk: DynPin,
-    pub addra: DynPin,
-    pub addrb: DynPin,
-    pub addrc: DynPin,
-    pub addrd: DynPin,
-    pub lat: DynPin,
-    pub oe: DynPin,
+pub struct DisplayPins<F: Function> {
+    pub r1: Pin<DynPinId, F, PullNone>,
+    pub g1: Pin<DynPinId, F, PullNone>,
+    pub b1: Pin<DynPinId, F, PullNone>,
+    pub r2: Pin<DynPinId, F, PullNone>,
+    pub g2: Pin<DynPinId, F, PullNone>,
+    pub b2: Pin<DynPinId, F, PullNone>,
+    pub clk: Pin<DynPinId, F, PullNone>,
+    pub addra: Pin<DynPinId, F, PullNone>,
+    pub addrb: Pin<DynPinId, F, PullNone>,
+    pub addrc: Pin<DynPinId, F, PullNone>,
+    pub addrd: Pin<DynPinId, F, PullNone>,
+    pub lat: Pin<DynPinId, F, PullNone>,
+    pub oe: Pin<DynPinId, F, PullNone>,
 }
 
 /// The HUB75 display driver
@@ -197,7 +196,7 @@ where
     /// * `dma_chs`: DMA channels to be used to drive the PIO state machines
     pub fn new<PE, SM0, SM1, SM2, CH0, CH2, CH3>(
         buffer: &'static mut DisplayMemory<W, H, B>,
-        mut pins: DisplayPins,
+        pins: DisplayPins<PE::PinFunction>,
         pio_block: &mut PIO<PE>,
         pio_sms: (
             UninitStateMachine<(PE, SM0)>,
@@ -209,7 +208,7 @@ where
         lut: &'a impl lut::Lut<B, C>,
     ) -> Self
     where
-        PE: PIOExt + FunctionConfig,
+        PE: PIOExt,
         SM0: StateMachineIndex,
         SM1: StateMachineIndex,
         SM2: StateMachineIndex,
@@ -218,23 +217,6 @@ where
         CH3: ChannelIndex,
         C: RgbColor,
     {
-        let fpins = [
-            &mut pins.r1,
-            &mut pins.g1,
-            &mut pins.b1,
-            &mut pins.r2,
-            &mut pins.g2,
-            &mut pins.b2,
-            &mut pins.clk,
-            &mut pins.addra,
-            &mut pins.addrb,
-            &mut pins.addrc,
-            &mut pins.addrd,
-            &mut pins.lat,
-            &mut pins.oe,
-        ];
-        fpins.map(|pin| pin.try_into_mode(DynPinMode::Function(PE::DYN)).unwrap());
-
         // Setup PIO SMs
         let (data_sm, row_sm, oe_sm) = pio_sms;
 
@@ -552,19 +534,20 @@ where
         let c_r: u16 = ((c_r as f32) * (self.brightness as f32 / 255f32)) as u16;
         let c_g: u16 = ((c_g as f32) * (self.brightness as f32 / 255f32)) as u16;
         let c_b: u16 = ((c_b as f32) * (self.brightness as f32 / 255f32)) as u16;
+        let base_idx = x + ((y % (H / 2)) * W * B);
         for b in 0..B {
             // Extract the n-th bit of each component of the color and pack them
             let cr = c_r >> b & 0b1;
             let cg = c_g >> b & 0b1;
             let cb = c_b >> b & 0b1;
-            let c = cb << 2 | cg << 1 | cr;
-            let idx = b * W + x + ((y % (H / 2)) * W * B);
+            let packed_rgb = (cb << 2 | cg << 1 | cr) as u8;
+            let idx = base_idx + b * W;
             if self.mem.fbptr[0] == (self.mem.fb0.as_ptr() as u32) {
                 self.mem.fb1[idx] &= !(0b111 << shift);
-                self.mem.fb1[idx] |= (c << shift) as u8;
+                self.mem.fb1[idx] |= packed_rgb << shift;
             } else {
                 self.mem.fb0[idx] &= !(0b111 << shift);
-                self.mem.fb0[idx] |= (c << shift) as u8;
+                self.mem.fb0[idx] |= packed_rgb << shift;
             }
         }
     }
